@@ -11,8 +11,8 @@ import { SubjectForm } from './SubjectForm';
 
 interface SubjectListProps {
   subjects: Subject[];
-  onUpdate: (id: string, data: Partial<Omit<Subject, 'id' | 'createdAt'>>) => Promise<void>;
-  onDelete: (id: string) => Promise<void>;
+  onUpdate: (id: string, data: Partial<Omit<Subject, 'id' | 'createdAt'>>) => Promise<boolean>;
+  onDelete: (id: string) => Promise<boolean>;
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -23,8 +23,11 @@ export function SubjectList({ subjects, onUpdate, onDelete }: SubjectListProps) 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const handleUpdate = async (id: string, data: Partial<Omit<Subject, 'id' | 'createdAt'>>) => {
-    await onUpdate(id, data);
-    setEditingId(null);
+    const updated = await onUpdate(id, data);
+
+    if (updated) {
+      setEditingId(null);
+    }
   };
 
   const confirmDelete = (id: string) => {
@@ -34,9 +37,12 @@ export function SubjectList({ subjects, onUpdate, onDelete }: SubjectListProps) 
 
   const handleDelete = async () => {
     if (deletingId) {
-      await onDelete(deletingId);
-      setIsDeleteDialogOpen(false);
-      setDeletingId(null);
+      const deleted = await onDelete(deletingId);
+
+      if (deleted) {
+        setIsDeleteDialogOpen(false);
+        setDeletingId(null);
+      }
     }
   };
 
@@ -84,10 +90,11 @@ export function SubjectList({ subjects, onUpdate, onDelete }: SubjectListProps) 
 
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <Dialog open={editingId === subject.id} onOpenChange={(open) => !open && setEditingId(null)}>
-                <DialogTrigger asChild>
-                  <Button variant="ghost" size="icon" onClick={() => setEditingId(subject.id)}>
-                    <Edit2 className="w-4 h-4 text-muted-foreground" />
-                  </Button>
+                <DialogTrigger
+                  onClick={() => setEditingId(subject.id)}
+                  render={<Button variant="ghost" size="icon" />}
+                >
+                  <Edit2 className="w-4 h-4 text-muted-foreground" />
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-[500px]">
                   <DialogHeader>

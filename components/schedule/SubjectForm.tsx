@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Subject } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,6 +43,18 @@ export function SubjectForm({ initialData, onSubmit, onCancel }: SubjectFormProp
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const handleWeekdayChange = (value: string | null) => {
+    if (value !== null) {
+      setWeekday(value);
+    }
+  };
+
+  const handleColorChange = (value: string | null) => {
+    if (value !== null) {
+      setColor(value);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -72,7 +84,8 @@ export function SubjectForm({ initialData, onSubmit, onCancel }: SubjectFormProp
         teacher: teacher.trim(),
         color,
       });
-    } catch (err) {
+    } catch (error) {
+      console.error('Failed to save subject:', error);
       setError('An error occurred while saving');
     } finally {
       setIsSubmitting(false);
@@ -96,7 +109,7 @@ export function SubjectForm({ initialData, onSubmit, onCancel }: SubjectFormProp
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="weekday">Day of Week *</Label>
-          <Select value={weekday} onValueChange={setWeekday}>
+          <Select value={weekday} onValueChange={handleWeekdayChange}>
             <SelectTrigger>
               <SelectValue placeholder="Select day" />
             </SelectTrigger>
@@ -109,7 +122,7 @@ export function SubjectForm({ initialData, onSubmit, onCancel }: SubjectFormProp
         </div>
         <div className="space-y-2">
           <Label htmlFor="color">Color Theme</Label>
-          <Select value={color} onValueChange={setColor}>
+          <Select value={color} onValueChange={handleColorChange}>
             <SelectTrigger>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />

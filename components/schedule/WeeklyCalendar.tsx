@@ -4,7 +4,6 @@ import { useMemo } from 'react';
 import { Subject } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
 
 interface WeeklyCalendarProps {
   subjects: Subject[];
