@@ -1,18 +1,32 @@
+'use client';
+
 import { Bell, Menu, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { useAuth } from '@/hooks/use-auth';
 import { Sidebar } from './sidebar';
 
 export function Topbar() {
+  const { user } = useAuth();
+  const displayName = user?.displayName || 'Explorer';
+  const initials = displayName
+    .split(' ')
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
   return (
     <header className="h-16 border-b bg-card flex items-center justify-between px-4 lg:px-6 sticky top-0 z-10">
       <div className="flex items-center gap-4">
         <Sheet>
-          <SheetTrigger>
-            <Button variant="ghost" size="icon" className="lg:hidden">
-              <Menu className="h-5 w-5" />
-            </Button>
+          <SheetTrigger
+            render={
+              <Button variant="ghost" size="icon" className="lg:hidden" />
+            }
+          >
+            <Menu className="h-5 w-5" />
           </SheetTrigger>
           <SheetContent side="left" className="p-0 w-64">
             <Sidebar />
@@ -36,16 +50,14 @@ export function Topbar() {
         </Button>
         <div className="flex items-center gap-3 pl-4 border-l">
           <div className="hidden sm:flex flex-col items-end">
-            <span className="text-sm font-medium">Alex Student</span>
-            <span className="text-xs text-primary font-bold">Level 12</span>
+            <span className="text-sm font-medium">{displayName}</span>
+            <span className="text-xs text-primary font-bold">Level {user?.level ?? 1}</span>
           </div>
           <Avatar className="h-9 w-9 border-2 border-primary/20">
-            <AvatarImage src="https://picsum.photos/seed/alex/100/100" />
-            <AvatarFallback>AL</AvatarFallback>
+            <AvatarFallback>{initials}</AvatarFallback>
           </Avatar>
         </div>
       </div>
     </header>
   );
 }
-
