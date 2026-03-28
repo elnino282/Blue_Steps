@@ -1,8 +1,6 @@
 import {
   collection,
   doc,
-  getDoc,
-  getDocs,
   setDoc,
 } from 'firebase/firestore';
 
@@ -13,15 +11,22 @@ import {
   getStartOfLocalDay,
   isSameLocalDay,
   isSessionMissed,
+  normalizeAttendanceSession,
   sortSessionsByTime,
 } from '@/lib/attendance';
+import { XP_VALUES, buildDailySummariesFromSessions } from '@/lib/gamification';
+import { FirestoreService } from '@/services/firestore.service';
 import { AttendanceSession } from '@/types';
+import { BadgeService } from '@/services/badge.service';
+import { ProfileService } from '@/services/profile.service';
 import { SubjectService } from '@/services/subject.service';
 
 type SubjectCounter = {
   totalSessions: number;
   attendedSessions: number;
 };
+
+const startupSyncPromises = new Map<string, Promise<void>>();
 
 export const AttendanceService = {
   getCollectionPath(uid: string) {
@@ -30,6 +35,109 @@ export const AttendanceService = {
 
   getDocumentPath(uid: string, sessionId: string) {
     return `${this.getCollectionPath(uid)}/${sessionId}`;
+  },
+
+  getRenderableSession(session: AttendanceSession, now = new Date()) {
+    if (!isSessionMissed(session, now)) {
+      return session;
+    }
+
+    return {
+      ...session,
+      status: 'missed' as const,
+    };
+  },
+
+  buildTodaySessions(
+    subjects: Awaited<ReturnType<typeof SubjectService.getSubjects>>,
+    existingSessions: AttendanceSession[],
+    today = new Date()
+  ) {
+    const todayStart = getStartOfLocalDay(today);
+    const todaySessionMap = new Map(
+      existingSessions
+        .filter((session) => isSameLocalDay(session.date, todayStart))
+        .map((session) => [session.id, session])
+    );
+
+    for (const subject of subjects) {
+      if (subject.weekday !== todayStart.getDay()) {
+        continue;
+      }
+
+      const generatedSession = buildAttendanceSession(subject, todayStart);
+      if (!todaySessionMap.has(generatedSession.id)) {
+        todaySessionMap.set(generatedSession.id, generatedSession);
+      }
+    }
+
+    return sortSessionsByTime(
+      [...todaySessionMap.values()].map((session) => this.getRenderableSession(session, today))
+    );
+  },
+
+  scheduleStartupSync(uid: string) {
+    const existingPromise = startupSyncPromises.get(uid);
+    if (existingPromise) {
+      return existingPromise;
+    }
+
+    const syncPromise = (async () => {
+      try {
+        await this.runStartupSync(uid);
+      } catch (error) {
+        if (!FirestoreService.isOfflineError(error)) {
+          console.error('Failed to run attendance startup sync:', error);
+        }
+      } finally {
+        startupSyncPromises.delete(uid);
+      }
+    })();
+
+    startupSyncPromises.set(uid, syncPromise);
+    return syncPromise;
+  },
+
+  async runStartupSync(uid: string) {
+    await this.ensureSessionsForToday(uid);
+
+    const allSessions = await this.getAllSessions(uid);
+    const todayStart = getStartOfLocalDay(new Date());
+    const todaySessions = allSessions.filter((session) => isSameLocalDay(session.date, todayStart));
+    const now = new Date();
+    const sessionsToMarkMissed = todaySessions.filter((session) => isSessionMissed(session, now));
+    let sessionsForProfileSync = allSessions;
+
+    if (sessionsToMarkMissed.length > 0) {
+      const missedIds = new Set(sessionsToMarkMissed.map((session) => session.id));
+      const updatedAt = Date.now();
+
+      await Promise.all(
+        sessionsToMarkMissed.map((session) =>
+          setDoc(
+            doc(db, this.getCollectionPath(uid), session.id),
+            {
+              status: 'missed',
+              updatedAt,
+            },
+            { merge: true }
+          )
+        )
+      );
+
+      sessionsForProfileSync = allSessions.map((session) =>
+        missedIds.has(session.id)
+          ? {
+              ...session,
+              status: 'missed' as const,
+              updatedAt,
+            }
+          : session
+      );
+    }
+
+    const { summaries } = await ProfileService.syncDailySummariesAndProfile(uid, sessionsForProfileSync);
+    await BadgeService.evaluateBadges(uid, summaries);
   },
 
   async ensureSessionsForToday(uid: string) {
@@ -47,8 +155,9 @@ export const AttendanceService = {
       return [];
     }
 
-    const existingSessionIds = new Set(existingSessions.map((session) => session.id));
+    const existingSessionMap = new Map(existingSessions.map((session) => [session.id, session]));
     const newSessions: AttendanceSession[] = [];
+    const syncedScheduledSessions: AttendanceSession[] = [];
 
     for (const date of getDatesInRange(startDate, endDate)) {
       const weekday = date.getDay();
@@ -56,78 +165,94 @@ export const AttendanceService = {
 
       for (const subject of matchingSubjects) {
         const session = buildAttendanceSession(subject, date);
-        if (!existingSessionIds.has(session.id)) {
+        const existingSession = existingSessionMap.get(session.id);
+
+        if (!existingSession) {
           newSessions.push(session);
-          existingSessionIds.add(session.id);
+          existingSessionMap.set(session.id, session);
+          continue;
         }
+
+        if (existingSession.status !== 'scheduled') {
+          continue;
+        }
+
+        const needsSync =
+          existingSession.subjectName !== subject.name ||
+          existingSession.startTime !== subject.startTime ||
+          existingSession.endTime !== subject.endTime ||
+          existingSession.weekday !== session.weekday;
+
+        if (!needsSync) {
+          continue;
+        }
+
+        const syncedSession: AttendanceSession = {
+          ...existingSession,
+          subjectName: subject.name,
+          date: session.date,
+          weekday: session.weekday,
+          startTime: subject.startTime,
+          endTime: subject.endTime,
+          updatedAt: Date.now(),
+        };
+
+        syncedScheduledSessions.push(syncedSession);
+        existingSessionMap.set(syncedSession.id, syncedSession);
       }
     }
 
-    if (newSessions.length === 0) {
+    if (newSessions.length === 0 && syncedScheduledSessions.length === 0) {
       return [];
     }
 
     await Promise.all(
-      newSessions.map((session) =>
+      newSessions.concat(syncedScheduledSessions).map((session) =>
         setDoc(doc(db, this.getCollectionPath(uid), session.id), session)
       )
     );
 
-    const affectedSubjectIds = [...new Set(newSessions.map((session) => session.subjectId))];
-    await this.syncSubjectCounters(uid, existingSessions.concat(newSessions), affectedSubjectIds);
+    const affectedSubjectIds = [
+      ...new Set(
+        newSessions
+          .concat(syncedScheduledSessions)
+          .map((session) => session.subjectId)
+      ),
+    ];
+    await this.syncSubjectCounters(uid, [...existingSessionMap.values()], affectedSubjectIds);
 
-    return newSessions;
+    return newSessions.concat(syncedScheduledSessions);
   },
 
   async getTodaySessions(uid: string) {
-    await this.ensureSessionsForToday(uid);
+    const [subjects, allSessions] = await Promise.all([
+      SubjectService.getSubjects(uid),
+      this.getAllSessions(uid),
+    ]);
 
-    const todayStart = getStartOfLocalDay(new Date());
-    const allSessions = await this.getAllSessions(uid);
-    const todaySessions = allSessions.filter((session) => isSameLocalDay(session.date, todayStart));
-    const now = new Date();
+    const todaySessions = this.buildTodaySessions(subjects, allSessions);
+    void this.scheduleStartupSync(uid);
 
-    const sessionsToMarkMissed = todaySessions.filter((session) => isSessionMissed(session, now));
-
-    if (sessionsToMarkMissed.length > 0) {
-      await Promise.all(
-        sessionsToMarkMissed.map((session) =>
-          setDoc(
-            doc(db, this.getCollectionPath(uid), session.id),
-            {
-              status: 'missed',
-              updatedAt: Date.now(),
-            },
-            { merge: true }
-          )
-        )
-      );
-    }
-
-    const normalizedSessions = todaySessions.map((session) => {
-      if (!sessionsToMarkMissed.find((item) => item.id === session.id)) {
-        return session;
-      }
-
-      return {
-        ...session,
-        status: 'missed' as const,
-        updatedAt: Date.now(),
-      };
-    });
-
-    return sortSessionsByTime(normalizedSessions);
+    return todaySessions;
   },
 
   async markAsAttended(uid: string, sessionId: string) {
     const sessionRef = doc(db, this.getCollectionPath(uid), sessionId);
-    const sessionSnapshot = await getDoc(sessionRef);
+    let sessionResult = await FirestoreService.readDocumentByRef<AttendanceSession>(sessionRef);
 
-    if (!sessionSnapshot.exists()) {
+    if (!sessionResult.data) {
+      await this.ensureSessionsForToday(uid);
+      sessionResult = await FirestoreService.readDocumentByRef<AttendanceSession>(sessionRef);
+    }
+
+    if (!sessionResult.data) {
       return null;
     }
 
-    const currentSession = this.normalizeSession(sessionSnapshot.id, sessionSnapshot.data());
+    const currentSession = normalizeAttendanceSession(
+      sessionId,
+      sessionResult.data as Partial<AttendanceSession>
+    );
 
     if (!currentSession) {
       return null;
@@ -137,26 +262,68 @@ export const AttendanceService = {
       return currentSession;
     }
 
-    const updatedSession: AttendanceSession = {
+    const allSessions = await this.getAllSessions(uid);
+    const checkInTimestamp = Date.now();
+    const provisionalSession: AttendanceSession = {
       ...currentSession,
       status: 'attended',
-      checkedInAt: Date.now(),
-      xpAwarded: currentSession.xpAwarded ?? 0,
-      streakBonus: currentSession.streakBonus ?? 0,
+      checkedInAt: checkInTimestamp,
+      xpAwarded: XP_VALUES.attendance,
+      streakBonus: 0,
       reasonRequired: false,
-      updatedAt: Date.now(),
+      updatedAt: checkInTimestamp,
+    };
+    const nextSessions = allSessions.map((session) =>
+      session.id === sessionId ? provisionalSession : session
+    );
+    const currentDateKey = new Date(currentSession.date).toDateString();
+    const sameDaySessions = nextSessions.filter(
+      (session) => new Date(session.date).toDateString() === currentDateKey
+    );
+    const attendedSessionsForDay = sameDaySessions.filter((session) => session.status === 'attended');
+    const summaries = buildDailySummariesFromSessions(nextSessions);
+    const currentDaySummary = summaries.find((summary) => summary.date === currentSession.date);
+    const streakBonus =
+      attendedSessionsForDay.length === 1 && (currentDaySummary?.streakCount ?? 0) > 1
+        ? XP_VALUES.streakDailyBonus
+        : 0;
+    const completionBonus =
+      sameDaySessions.length > 0 && sameDaySessions.every((session) => session.status === 'attended')
+        ? XP_VALUES.perfectDayBonus
+        : 0;
+    const updatedSession: AttendanceSession = {
+      ...provisionalSession,
+      xpAwarded: XP_VALUES.attendance + completionBonus,
+      streakBonus,
+      reasonRequired: false,
+      updatedAt: checkInTimestamp,
     };
 
     await setDoc(sessionRef, updatedSession, { merge: true });
-    await this.syncSubjectCounters(uid, undefined, [updatedSession.subjectId]);
+    const syncedSessions = nextSessions.map((session) =>
+      session.id === updatedSession.id ? updatedSession : session
+    );
+    await this.syncSubjectCounters(uid, syncedSessions, [updatedSession.subjectId]);
+    const { summaries: syncedSummaries } = await ProfileService.syncDailySummariesAndProfile(
+      uid,
+      syncedSessions
+    );
+    await BadgeService.evaluateBadges(uid, syncedSummaries);
 
     return updatedSession;
   },
 
   async getAllSessions(uid: string) {
-    const snapshot = await getDocs(collection(db, this.getCollectionPath(uid)));
-    const sessions = snapshot.docs
-      .map((sessionDoc) => this.normalizeSession(sessionDoc.id, sessionDoc.data()))
+    const result = await FirestoreService.readCollectionByQuery<AttendanceSession>(
+      collection(db, this.getCollectionPath(uid))
+    );
+    const sessions = result.data
+      .map((sessionDoc) =>
+        normalizeAttendanceSession(
+          sessionDoc.id,
+          sessionDoc as Partial<AttendanceSession>
+        )
+      )
       .filter((session): session is AttendanceSession => session !== null);
 
     return sortSessionsByTime(sessions);
@@ -170,9 +337,9 @@ export const AttendanceService = {
     await Promise.all(
       relevantSubjectIds.map(async (subjectId) => {
         const subjectRef = doc(db, SubjectService.getCollectionPath(uid), subjectId);
-        const subjectSnapshot = await getDoc(subjectRef);
+        const subjectResult = await FirestoreService.readDocumentByRef(subjectRef);
 
-        if (!subjectSnapshot.exists()) {
+        if (!subjectResult.data) {
           return;
         }
 
@@ -208,34 +375,5 @@ export const AttendanceService = {
       accumulator.set(session.subjectId, current);
       return accumulator;
     }, new Map<string, SubjectCounter>());
-  },
-
-  normalizeSession(id: string, rawSession: Partial<AttendanceSession>) {
-    if (!rawSession.subjectId || typeof rawSession.date !== 'number') {
-      return null;
-    }
-
-    const sessionDate = new Date(rawSession.date);
-    const normalizedStatus =
-      rawSession.status === 'attended' || rawSession.status === 'missed' || rawSession.status === 'scheduled'
-        ? rawSession.status
-        : 'scheduled';
-
-    return {
-      id,
-      subjectId: rawSession.subjectId,
-      subjectName: rawSession.subjectName ?? 'Class session',
-      date: rawSession.date,
-      weekday: rawSession.weekday ?? sessionDate.getDay(),
-      startTime: rawSession.startTime ?? '00:00',
-      endTime: rawSession.endTime ?? rawSession.startTime ?? '00:00',
-      status: normalizedStatus,
-      checkedInAt: rawSession.checkedInAt ?? null,
-      xpAwarded: rawSession.xpAwarded ?? 0,
-      streakBonus: rawSession.streakBonus ?? 0,
-      reasonRequired: rawSession.reasonRequired ?? false,
-      createdAt: rawSession.createdAt ?? rawSession.date,
-      updatedAt: rawSession.updatedAt ?? rawSession.createdAt ?? rawSession.date,
-    } satisfies AttendanceSession;
   },
 };

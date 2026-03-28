@@ -1,6 +1,7 @@
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
-import { Subject } from '@/types';
+import { collection, doc, setDoc, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { FirestoreService } from '@/services/firestore.service';
+import { AttendanceSession, Subject } from '@/types';
 
 export const SubjectService = {
   getCollectionPath(uid: string) {
@@ -8,28 +9,17 @@ export const SubjectService = {
   },
 
   async getSubjects(uid: string): Promise<Subject[]> {
-    try {
-      const colRef = collection(db, this.getCollectionPath(uid));
-      // Order by weekday and then startTime
-      const q = query(colRef, orderBy('weekday', 'asc'), orderBy('startTime', 'asc'));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject));
-    } catch (error) {
-      console.error("Error fetching subjects:", error);
-      return [];
-    }
+    const colRef = collection(db, this.getCollectionPath(uid));
+    const q = query(colRef, orderBy('weekday', 'asc'), orderBy('startTime', 'asc'));
+    const result = await FirestoreService.readCollectionByQuery<Subject>(q);
+    return result.data;
   },
 
   async getSubjectsByWeekday(uid: string, weekday: number): Promise<Subject[]> {
-    try {
-      const colRef = collection(db, this.getCollectionPath(uid));
-      const q = query(colRef, where('weekday', '==', weekday), orderBy('startTime', 'asc'));
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Subject));
-    } catch (error) {
-      console.error("Error fetching subjects by weekday:", error);
-      return [];
-    }
+    const colRef = collection(db, this.getCollectionPath(uid));
+    const q = query(colRef, where('weekday', '==', weekday), orderBy('startTime', 'asc'));
+    const result = await FirestoreService.readCollectionByQuery<Subject>(q);
+    return result.data;
   },
 
   async createSubject(uid: string, subjectData: Omit<Subject, 'id' | 'createdAt' | 'totalSessions' | 'attendedSessions'>): Promise<Subject | null> {
@@ -68,6 +58,27 @@ export const SubjectService = {
     try {
       const docRef = doc(db, this.getCollectionPath(uid), subjectId);
       await deleteDoc(docRef);
+
+      const sessionsQuery = query(
+        collection(db, `users/${uid}/attendanceSessions`),
+        where('subjectId', '==', subjectId)
+      );
+      const sessionsResult = await FirestoreService.readCollectionByQuery<AttendanceSession>(
+        sessionsQuery
+      );
+
+      await Promise.all(
+        sessionsResult.data.map((session) => {
+          const sessionRef = doc(db, `users/${uid}/attendanceSessions`, session.id);
+
+          if (session.status === 'attended' || session.status === 'missed') {
+            return Promise.resolve();
+          }
+
+          return deleteDoc(sessionRef);
+        })
+      );
+
       return true;
     } catch (error) {
       console.error("Error deleting subject:", error);
