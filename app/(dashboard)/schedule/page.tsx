@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { Subject } from '@/types';
+import { Card, CardContent } from '@/components/ui/card';
+import { useAuth } from '@/hooks/use-auth';
 import { useSubjects } from '@/hooks/use-subjects';
 import { Button } from '@/components/ui/button';
 import { Plus, Calendar as CalendarIcon, List, Zap } from 'lucide-react';
@@ -12,20 +14,43 @@ import { SubjectList } from '@/components/schedule/SubjectList';
 import { WeeklyCalendar } from '@/components/schedule/WeeklyCalendar';
 
 export default function SchedulePage() {
+  const { needsOnlineBootstrap } = useAuth();
   const { subjects, loading, createSubject, updateSubject, deleteSubject, seedDemo } = useSubjects();
   const [isAddOpen, setIsAddOpen] = useState(false);
 
   const handleAddSubject = async (
     data: Omit<Subject, 'id' | 'createdAt' | 'totalSessions' | 'attendedSessions'>
   ) => {
-    await createSubject(data);
-    setIsAddOpen(false);
+    const createdSubject = await createSubject(data);
+
+    if (createdSubject) {
+      setIsAddOpen(false);
+    }
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
+
+  if (needsOnlineBootstrap) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Schedule</h1>
+          <p className="text-muted-foreground mt-1">Manage your classes and study sessions.</p>
+        </div>
+        <Card className="rounded-3xl border-dashed bg-secondary/20 shadow-sm">
+          <CardContent className="p-8 text-center">
+            <p className="text-lg font-semibold">Connect once to create your account</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You need to be online at least once before BlueStep can store your schedule and attendance data.
+            </p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -45,11 +70,9 @@ export default function SchedulePage() {
             </Button>
           )}
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-            <DialogTrigger asChild>
-              <Button className="rounded-full shadow-md gap-2">
-                <Plus className="w-5 h-5" />
-                Add Subject
-              </Button>
+            <DialogTrigger render={<Button className="rounded-full shadow-md gap-2" />}>
+              <Plus className="w-5 h-5" />
+              Add Subject
             </DialogTrigger>
             <DialogContent className="sm:max-w-[500px]">
               <DialogHeader>

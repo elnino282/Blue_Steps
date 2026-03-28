@@ -7,14 +7,15 @@ import {
   CalendarCheck2,
   CheckCircle2,
   Clock3,
-  Flame,
   MapPin,
   Sparkles,
-  TrendingUp,
   UserRound,
-  Zap,
 } from 'lucide-react';
 
+import { BadgeGrid } from '@/components/gamification/BadgeGrid';
+import { LevelCard } from '@/components/gamification/LevelCard';
+import { StreakCard } from '@/components/gamification/StreakCard';
+import { XpProgress } from '@/components/gamification/XpProgress';
 import { useDashboardData } from '@/hooks/use-dashboard-data';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -47,11 +48,14 @@ export default function DashboardPage() {
   const {
     greeting,
     userSummary,
+    xpProgress,
     todayProgress,
     todaySessions,
     emptyState,
+    featuredBadges,
     loading,
     error,
+    needsOnlineBootstrap,
     markAsAttended,
   } = useDashboardData();
 
@@ -101,6 +105,8 @@ export default function DashboardPage() {
                 <span>{todayProgress.missed} missed</span>
                 <span className="h-1 w-1 rounded-full bg-border" />
                 <span>{todayProgress.percent}% completed</span>
+                <span className="h-1 w-1 rounded-full bg-border" />
+                <span>{userSummary.totalXp} XP total</span>
               </div>
             </CardContent>
           </Card>
@@ -113,53 +119,32 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Card className="rounded-3xl border-none bg-primary/5 shadow-sm">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="rounded-2xl bg-primary/15 p-3 text-primary">
-              <Zap className="h-6 w-6" />
+      {needsOnlineBootstrap ? (
+        <Card className="rounded-3xl border-dashed bg-secondary/20 shadow-sm">
+          <CardContent className="p-8 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <BookOpen className="h-6 w-6" />
             </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Current level</p>
-              <h2 className="text-2xl font-bold">Level {userSummary.level}</h2>
-              <p className="text-xs text-muted-foreground">
-                XP engine placeholder, ready for real rewards later.
-              </p>
-            </div>
+            <h2 className="mt-4 text-xl font-semibold">Connect once to start BlueStep</h2>
+            <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-muted-foreground">
+              You need to be online at least once so BlueStep can create your anonymous account and sync your data.
+            </p>
           </CardContent>
         </Card>
+      ) : null}
 
-        <Card className="rounded-3xl border-none bg-yellow-500/5 shadow-sm">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="rounded-2xl bg-yellow-500/15 p-3 text-yellow-600">
-              <TrendingUp className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Total XP</p>
-              <h2 className="text-2xl font-bold">{userSummary.xp} XP</h2>
-              <p className="text-xs text-muted-foreground">
-                Next placeholder milestone: {userSummary.nextLevelXp} XP.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-3xl border-none bg-orange-500/5 shadow-sm">
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="rounded-2xl bg-orange-500/15 p-3 text-orange-500">
-              <Flame className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Current streak</p>
-              <h2 className="text-2xl font-bold">
-                {userSummary.streak} day{userSummary.streak === 1 ? '' : 's'}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Streak logic is still placeholder, attendance flow is live.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+      {!needsOnlineBootstrap ? (
+        <>
+          <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <LevelCard
+          level={userSummary.level}
+          totalXp={userSummary.totalXp}
+          xpToNextLevel={xpProgress.xpToNextLevel}
+        />
+        <StreakCard
+          currentStreak={userSummary.currentStreak}
+          bestStreak={userSummary.bestStreak}
+        />
       </section>
 
       <section className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(320px,1fr)]">
@@ -273,43 +258,24 @@ export default function DashboardPage() {
         </Card>
 
         <div className="space-y-6">
-          <Card className="rounded-3xl bg-primary text-primary-foreground shadow-sm">
-            <CardContent className="space-y-4 p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15">
-                <Sparkles className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold">Keep it simple today</h3>
-                <p className="mt-2 text-sm leading-6 text-primary-foreground/80">
-                  Weekly schedule creates the sessions. Manual check-in confirms the real class
-                  attendance. This step is intentionally lightweight so the demo flow stays clear
-                  and reliable.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <XpProgress
+            level={userSummary.level}
+            currentLevelXp={xpProgress.currentLevelXp}
+            requiredXp={xpProgress.requiredXp}
+            xpToNextLevel={xpProgress.xpToNextLevel}
+            progressPercent={xpProgress.progressPercent}
+          />
 
-          <Card className="rounded-3xl shadow-sm">
-            <CardHeader>
-              <CardTitle>Level progress placeholder</CardTitle>
-              <CardDescription>Ready for future XP and gamification rules.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <span>Level {userSummary.level}</span>
-                <span className="text-muted-foreground">
-                  {userSummary.xp} / {userSummary.nextLevelXp} XP
-                </span>
-              </div>
-              <Progress value={userSummary.progressToNextLevel} className="h-2.5" />
-              <p className="text-sm leading-6 text-muted-foreground">
-                The attendance workflow is real now. XP and streak formulas can plug into this card
-                later without changing the dashboard structure.
-              </p>
-            </CardContent>
-          </Card>
+          <BadgeGrid
+            badges={featuredBadges}
+            compact
+            title="Badge preview"
+            description="Recent milestones stay visible here. The full collection is on the Progress page."
+          />
         </div>
       </section>
+        </>
+      ) : null}
     </div>
   );
 }
