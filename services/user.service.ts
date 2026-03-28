@@ -1,8 +1,8 @@
-import { User } from '@/types';
+import { UserProfile } from '@/types';
 
 // Placeholder service for user-related operations
 export const UserService = {
-  async getUserProfile(userId: string): Promise<User | null> {
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
     // TODO: Implement Firebase fetch
     console.log('Fetching user profile for', userId);
     return null;
