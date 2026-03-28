@@ -31,10 +31,18 @@ export type Subject = {
 export type AttendanceSession = {
   id: string;
   subjectId: string;
+  subjectName: string;
   date: number;
-  status: 'attended' | 'missed' | 'excused';
-  xpEarned: number;
-  notes?: string;
+  weekday: number;
+  startTime: string;
+  endTime: string;
+  status: 'scheduled' | 'attended' | 'missed';
+  checkedInAt: number | null;
+  xpAwarded: number;
+  streakBonus: number;
+  reasonRequired: boolean;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type DailySummary = {
@@ -60,4 +68,3 @@ export type Badge = {
   icon: string;
   unlockedAt: number;
 };
-
