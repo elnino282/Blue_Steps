@@ -11,10 +11,35 @@ import {
 
 import { AttendanceSession, Subject } from '@/types';
 
+type TimestampLike = {
+  toMillis: () => number;
+};
+
 export type DateRange = {
   start: Date;
   end: Date;
 };
+
+export function toMillis(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toMillis' in value &&
+    typeof (value as TimestampLike).toMillis === 'function'
+  ) {
+    return (value as TimestampLike).toMillis();
+  }
+
+  return null;
+}
 
 export function getStartOfLocalDay(date: Date) {
   return startOfDay(date);
@@ -69,6 +94,46 @@ export function buildAttendanceSession(subject: Subject, date: Date): Attendance
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+export function normalizeAttendanceSession(id: string, rawSession: Partial<AttendanceSession>) {
+  const sessionDateMillis = toMillis(rawSession.date);
+
+  if (!rawSession.subjectId || sessionDateMillis === null) {
+    return null;
+  }
+
+  const sessionDate = new Date(sessionDateMillis);
+  const normalizedStatus =
+    rawSession.status === 'attended' || rawSession.status === 'missed' || rawSession.status === 'scheduled'
+      ? rawSession.status
+      : 'scheduled';
+  const xpAwarded =
+    typeof rawSession.xpAwarded === 'number'
+      ? rawSession.xpAwarded
+      : normalizedStatus === 'attended'
+        ? 60
+        : 0;
+
+  return {
+    id,
+    subjectId: rawSession.subjectId,
+    subjectName: rawSession.subjectName ?? 'Class session',
+    date: sessionDateMillis,
+    weekday: rawSession.weekday ?? sessionDate.getDay(),
+    startTime: rawSession.startTime ?? '00:00',
+    endTime: rawSession.endTime ?? rawSession.startTime ?? '00:00',
+    status: normalizedStatus,
+    checkedInAt: toMillis(rawSession.checkedInAt) ?? null,
+    xpAwarded,
+    streakBonus: rawSession.streakBonus ?? 0,
+    reasonRequired: rawSession.reasonRequired ?? false,
+    createdAt: toMillis(rawSession.createdAt) ?? sessionDateMillis,
+    updatedAt:
+      toMillis(rawSession.updatedAt) ??
+      toMillis(rawSession.createdAt) ??
+      sessionDateMillis,
+  } satisfies AttendanceSession;
 }
 
 export function toSessionDateTime(session: Pick<AttendanceSession, 'date' | 'startTime' | 'endTime'>, field: 'startTime' | 'endTime') {
