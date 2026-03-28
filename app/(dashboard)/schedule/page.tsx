@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Subject } from '@/types';
 import { useSubjects } from '@/hooks/use-subjects';
 import { Button } from '@/components/ui/button';
 import { Plus, Calendar as CalendarIcon, List, Zap } from 'lucide-react';
@@ -14,7 +15,9 @@ export default function SchedulePage() {
   const { subjects, loading, createSubject, updateSubject, deleteSubject, seedDemo } = useSubjects();
   const [isAddOpen, setIsAddOpen] = useState(false);
 
-  const handleAddSubject = async (data: any) => {
+  const handleAddSubject = async (
+    data: Omit<Subject, 'id' | 'createdAt' | 'totalSessions' | 'attendedSessions'>
+  ) => {
     await createSubject(data);
     setIsAddOpen(false);
   };
@@ -92,4 +95,3 @@ export default function SchedulePage() {
     </div>
   );
 }
-
