@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, DocumentData } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, DocumentData } from 'firebase/firestore';
 
 export const FirestoreService = {
   /**

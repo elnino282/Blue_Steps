@@ -1,4 +1,4 @@
-import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
 import { UserProfile, UserSettings } from '@/types';
