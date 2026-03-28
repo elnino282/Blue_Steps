@@ -6,33 +6,52 @@ import { SubjectService } from '@/services/subject.service';
 import { useAuth } from '@/hooks/use-auth';
 
 export function useSubjects() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, needsOnlineBootstrap } = useAuth();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchSubjects = useCallback(async () => {
-    if (!user) return;
+    if (!user || needsOnlineBootstrap) {
+      setSubjects([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
       const data = await SubjectService.getSubjects(user.uid);
       setSubjects(data);
-    } catch (err) {
+    } catch (error) {
+      console.error('Failed to load subjects:', error);
       setError('Failed to load subjects');
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [needsOnlineBootstrap, user]);
 
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
+    if (needsOnlineBootstrap) {
+      setSubjects([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
     if (user) {
       fetchSubjects();
     } else {
       setSubjects([]);
+      setError(null);
       setLoading(false);
     }
-  }, [user, fetchSubjects]);
+  }, [authLoading, needsOnlineBootstrap, user, fetchSubjects]);
 
   const createSubject = async (data: Omit<Subject, 'id' | 'createdAt' | 'totalSessions' | 'attendedSessions'>) => {
     if (!user) return null;
@@ -87,8 +106,9 @@ export function useSubjects() {
 
   return {
     subjects,
-    loading,
+    loading: authLoading || loading,
     error,
+    needsOnlineBootstrap,
     createSubject,
     updateSubject,
     deleteSubject,

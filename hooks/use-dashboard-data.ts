@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 
 import { useAttendance } from '@/hooks/use-attendance';
+import { useGamification } from '@/hooks/use-gamification';
 import { useAuth } from '@/hooks/use-auth';
 import { useSubjects } from '@/hooks/use-subjects';
 
@@ -13,31 +14,33 @@ function getGreeting(displayName?: string) {
   if (hour < 12) {
     return {
       title: `Good morning, ${name}`,
-      description: 'A calm start still counts. Check in for your classes and keep today moving.',
+      description: 'Classes count more when the routine feels light enough to repeat.',
     };
   }
 
   if (hour < 18) {
     return {
       title: `Good afternoon, ${name}`,
-      description: 'You are in the middle of the day now. A few honest check-ins go a long way.',
+      description: 'Keep the day honest. Each check-in feeds your XP, streak, and badges.',
     };
   }
 
   return {
     title: `Good evening, ${name}`,
-    description: 'Close the day with clarity. Mark what you attended and keep your rhythm steady.',
+    description: 'A clean check-in before the day ends still moves your progress forward.',
   };
 }
 
 export function useDashboardData() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, needsOnlineBootstrap } = useAuth();
   const {
     subjects,
     loading: subjectsLoading,
     error: subjectsError,
+    needsOnlineBootstrap: subjectsNeedBootstrap,
   } = useSubjects();
   const attendance = useAttendance();
+  const gamification = useGamification();
 
   const subjectById = useMemo(
     () => new Map(subjects.map((subject) => [subject.id, subject])),
@@ -74,27 +77,17 @@ export function useDashboardData() {
     };
   }, [todaySessions]);
 
-  const userSummary = useMemo(() => {
-    const level = user?.level ?? 1;
-    const xp = user?.xp ?? 0;
-    const streak = user?.streak ?? 0;
-    const nextLevelXp = level * 250;
-    const currentLevelFloor = Math.max((level - 1) * 250, 0);
-    const progressToNextLevel = Math.max(
-      Math.min(Math.round(((xp - currentLevelFloor) / Math.max(nextLevelXp - currentLevelFloor, 1)) * 100), 100),
-      0
-    );
-
-    return {
-      level,
-      xp,
-      streak,
-      nextLevelXp,
-      progressToNextLevel,
-    };
-  }, [user]);
-
   const emptyState = useMemo(() => {
+    if (needsOnlineBootstrap || subjectsNeedBootstrap) {
+      return {
+        title: 'Connect once to start BlueStep',
+        description:
+          'You need to be online at least once so BlueStep can create your anonymous account and sync your data.',
+        actionLabel: 'Try Again When Online',
+        actionHref: '/dashboard',
+      };
+    }
+
     if (subjects.length === 0) {
       return {
         title: 'No classes in your schedule yet',
@@ -110,17 +103,36 @@ export function useDashboardData() {
       actionLabel: 'Review Schedule',
       actionHref: '/schedule',
     };
-  }, [subjects.length]);
+  }, [needsOnlineBootstrap, subjects.length, subjectsNeedBootstrap]);
 
-  const greeting = useMemo(() => getGreeting(user?.displayName), [user?.displayName]);
+  const greeting = useMemo(
+    () => getGreeting(gamification.userSummary.displayName || user?.displayName),
+    [gamification.userSummary.displayName, user?.displayName]
+  );
+  const featuredBadges = useMemo(() => {
+    return [...gamification.badges]
+      .sort((left, right) => {
+        if (left.unlocked !== right.unlocked) {
+          return left.unlocked ? -1 : 1;
+        }
+
+        return (right.unlockedAt ?? 0) - (left.unlockedAt ?? 0);
+      })
+      .slice(0, 4);
+  }, [gamification.badges]);
 
   return {
     greeting,
-    userSummary,
+    userSummary: gamification.userSummary,
+    xpProgress: gamification.xpProgress,
+    badges: gamification.badges,
+    featuredBadges,
     todayProgress,
     todaySessions,
     emptyState,
+    needsOnlineBootstrap,
     loading: authLoading || subjectsLoading || attendance.loading,
+    gamificationLoading: gamification.loading,
     error: subjectsError || attendance.error,
     markAsAttended: attendance.markAsAttended,
     refresh: attendance.refresh,
