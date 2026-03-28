@@ -8,13 +8,13 @@ import { sortSessionsByTime } from '@/lib/attendance';
 import { useAuth } from '@/hooks/use-auth';
 
 export function useAttendance() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, needsOnlineBootstrap } = useAuth();
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!user) {
+    if (!user || needsOnlineBootstrap) {
       setSessions([]);
       setError(null);
       setLoading(false);
@@ -27,13 +27,13 @@ export function useAttendance() {
     try {
       const nextSessions = await AttendanceService.getTodaySessions(user.uid);
       setSessions(nextSessions);
-    } catch (err) {
-      console.error('Failed to load attendance sessions:', err);
+    } catch (error) {
+      console.error('Failed to load attendance sessions:', error);
       setError('Failed to load today sessions');
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [needsOnlineBootstrap, user]);
 
   useEffect(() => {
     if (authLoading) {
@@ -94,8 +94,8 @@ export function useAttendance() {
         );
 
         return updatedSession;
-      } catch (err) {
-        console.error('Failed to mark session as attended:', err);
+      } catch (error) {
+        console.error('Failed to mark session as attended:', error);
         setSessions((currentSessions) =>
           sortSessionsByTime(
             currentSessions.map((session) =>
@@ -114,6 +114,7 @@ export function useAttendance() {
     sessions,
     loading: authLoading || loading,
     error,
+    needsOnlineBootstrap,
     refresh,
     markAsAttended,
   };

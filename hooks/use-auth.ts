@@ -2,16 +2,18 @@
 
 import { useState, useEffect } from 'react';
 import { UserProfile } from '@/types';
-import { AuthService } from '@/services/auth.service';
+import { AuthService, type AuthState } from '@/services/auth.service';
 
 export function useAuth() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [needsOnlineBootstrap, setNeedsOnlineBootstrap] = useState(false);
 
   useEffect(() => {
     // Initialize auth and listen for state changes
-    const unsubscribe = AuthService.initAuth((profile) => {
-      setUser(profile);
+    const unsubscribe = AuthService.initAuth((state: AuthState) => {
+      setUser(state.user);
+      setNeedsOnlineBootstrap(state.needsOnlineBootstrap);
       setLoading(false);
     });
 
@@ -19,6 +21,5 @@ export function useAuth() {
     return () => unsubscribe();
   }, []);
 
-  return { user, loading };
+  return { user, loading, needsOnlineBootstrap };
 }
-

@@ -4,6 +4,7 @@ export type UserProfile = {
   level: number;
   xp: number;
   streak: number;
+  bestStreak: number;
   createdAt: number;
   lastActiveAt: number;
 };
@@ -47,10 +48,22 @@ export type AttendanceSession = {
 
 export type DailySummary = {
   dateKey: string; // Format: YYYY-MM-DD
+  date: number;
+  scheduledSessions: number;
+  attendedSessions: number;
+  missedSessions: number;
+  pendingSessions: number;
+  completedAllSessions: boolean;
+  qualifiesForStreak: boolean;
+  breaksStreak: boolean;
+  streakCount: number;
+  bestStreak: number;
+  baseXpEarned: number;
+  completionBonusEarned: number;
+  streakBonusEarned: number;
   totalXpEarned: number;
-  sessionsAttended: number;
-  sessionsMissed: number;
   streakMaintained: boolean;
+  updatedAt: number;
 };
 
 export type ReasonLog = {
@@ -61,10 +74,25 @@ export type ReasonLog = {
   date: number;
 };
 
+export type BadgeId =
+  | 'first-attend'
+  | 'streak-3'
+  | 'streak-7'
+  | 'perfect-week'
+  | 'no-skip-week'
+  | 'comeback';
+
 export type Badge = {
-  id: string;
+  id: BadgeId;
   name: string;
   description: string;
   icon: string;
   unlockedAt: number;
+};
+
+export type BadgeDefinition = Omit<Badge, 'unlockedAt'>;
+
+export type BadgeStatus = BadgeDefinition & {
+  unlocked: boolean;
+  unlockedAt: number | null;
 };

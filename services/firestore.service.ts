@@ -1,33 +1,206 @@
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, DocumentData } from 'firebase/firestore';
+import {
+  collection,
+  CollectionReference,
+  deleteDoc,
+  doc,
+  DocumentData,
+  DocumentReference,
+  getDoc,
+  getDocFromCache,
+  getDocs,
+  getDocsFromCache,
+  Query,
+  QuerySnapshot,
+  setDoc,
+  updateDoc,
+} from 'firebase/firestore';
+
+export type FirestoreReadMetadata = {
+  offline: boolean;
+  fromCache: boolean;
+};
+
+export type FirestoreDocumentResult<T> = {
+  data: T | null;
+  metadata: FirestoreReadMetadata & {
+    exists: boolean;
+  };
+};
+
+export type FirestoreCollectionResult<T> = {
+  data: (T & { id: string })[];
+  metadata: FirestoreReadMetadata;
+};
+
+const FIRESTORE_READ_TIMEOUT_MS = 3000;
+
+function mapCollectionSnapshot<T>(snapshot: QuerySnapshot<DocumentData>) {
+  return snapshot.docs.map(
+    (documentSnapshot) =>
+      ({ id: documentSnapshot.id, ...documentSnapshot.data() }) as T & { id: string }
+  );
+}
+
+function createReadTimeoutError(scope: string) {
+  const error = new Error(`Firestore read timeout while loading ${scope}`);
+  (error as Error & { code?: string }).code = 'deadline-exceeded';
+  return error;
+}
+
+async function withReadTimeout<T>(promise: Promise<T>, scope: string) {
+  let timeoutId: number | undefined;
+
+  try {
+    return await Promise.race<T>([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(createReadTimeoutError(scope));
+        }, FIRESTORE_READ_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+}
 
 export const FirestoreService = {
+  isOfflineError(error: unknown) {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const code =
+      'code' in error && typeof error.code === 'string'
+        ? error.code
+        : '';
+    const message =
+      'message' in error && typeof error.message === 'string'
+        ? error.message.toLowerCase()
+        : '';
+
+    return (
+      code === 'unavailable' ||
+      code === 'deadline-exceeded' ||
+      code === 'failed-precondition' ||
+      message.includes('offline') ||
+      message.includes('network') ||
+      message.includes('timeout')
+    );
+  },
+
+  logReadError(scope: string, error: unknown) {
+    if (this.isOfflineError(error)) {
+      return;
+    }
+
+    console.error(scope, error);
+  },
+
+  async readDocumentByRef<T>(
+    documentRef: DocumentReference<DocumentData>
+  ): Promise<FirestoreDocumentResult<T>> {
+    try {
+      const snapshot =
+        typeof window === 'undefined'
+          ? await getDoc(documentRef)
+          : await withReadTimeout(getDoc(documentRef), documentRef.path);
+
+      return {
+        data: snapshot.exists() ? (snapshot.data() as T) : null,
+        metadata: {
+          offline: false,
+          fromCache: snapshot.metadata.fromCache,
+          exists: snapshot.exists(),
+        },
+      };
+    } catch (error) {
+      this.logReadError(`Error getting document at ${documentRef.path}:`, error);
+
+      try {
+        const snapshot = await getDocFromCache(documentRef);
+
+        return {
+          data: snapshot.exists() ? (snapshot.data() as T) : null,
+          metadata: {
+            offline: true,
+            fromCache: true,
+            exists: snapshot.exists(),
+          },
+        };
+      } catch (cacheError) {
+        return {
+          data: null,
+          metadata: {
+            offline: this.isOfflineError(error) || this.isOfflineError(cacheError),
+            fromCache: true,
+            exists: false,
+          },
+        };
+      }
+    }
+  },
+
+  async readCollectionByQuery<T>(
+    queryRef: Query<DocumentData> | CollectionReference<DocumentData>
+  ): Promise<FirestoreCollectionResult<T>> {
+    const path = 'path' in queryRef ? queryRef.path : 'query';
+
+    try {
+      const snapshot =
+        typeof window === 'undefined'
+          ? await getDocs(queryRef)
+          : await withReadTimeout(getDocs(queryRef), path);
+
+      return {
+        data: mapCollectionSnapshot<T>(snapshot),
+        metadata: {
+          offline: false,
+          fromCache: snapshot.metadata.fromCache,
+        },
+      };
+    } catch (error) {
+      this.logReadError(`Error getting collection at ${path}:`, error);
+
+      try {
+        const snapshot = await getDocsFromCache(queryRef);
+
+        return {
+          data: mapCollectionSnapshot<T>(snapshot),
+          metadata: {
+            offline: true,
+            fromCache: true,
+          },
+        };
+      } catch (cacheError) {
+        return {
+          data: [],
+          metadata: {
+            offline: this.isOfflineError(error) || this.isOfflineError(cacheError),
+            fromCache: true,
+          },
+        };
+      }
+    }
+  },
+
   /**
    * Generic helper to get a single document
    */
   async getDocument<T>(path: string): Promise<T | null> {
-    try {
-      const docRef = doc(db, path);
-      const docSnap = await getDoc(docRef);
-      return docSnap.exists() ? (docSnap.data() as T) : null;
-    } catch (error) {
-      console.error(`Error getting document at ${path}:`, error);
-      return null;
-    }
+    const result = await this.readDocumentByRef<T>(doc(db, path));
+    return result.data;
   },
 
   /**
    * Generic helper to get all documents in a collection
    */
   async getCollection<T>(path: string): Promise<(T & { id: string })[]> {
-    try {
-      const colRef = collection(db, path);
-      const snapshot = await getDocs(colRef);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as T & { id: string }));
-    } catch (error) {
-      console.error(`Error getting collection at ${path}:`, error);
-      return [];
-    }
+    const result = await this.readCollectionByQuery<T>(collection(db, path));
+    return result.data;
   },
 
   /**
